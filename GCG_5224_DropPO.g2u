@@ -1,0 +1,424 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.formDropShipPO..Create
+Gui.formDropShipPO..Caption("Drop Ship Po")
+Gui.formDropShipPO..Size(15360,10695)
+Gui.formDropShipPO..MinX(0)
+Gui.formDropShipPO..MinY(0)
+Gui.formDropShipPO..Position(0,0)
+Gui.formDropShipPO..BackColor(-2147483633)
+Gui.formDropShipPO..MousePointer(0)
+Gui.formDropShipPO..Event(UnLoad,formDropShipPO_UnLoad)
+Gui.formDropShipPO.GsGridDropShipPo.Create(GsGridControl)
+Gui.formDropShipPO.GsGridDropShipPo.Size(14235,3300)
+Gui.formDropShipPO.GsGridDropShipPo.Position(270,420)
+Gui.formDropShipPO.GsGridDropShipPo.Anchor(15)
+Gui.formDropShipPO.btnAddLine.Create(Button)
+Gui.formDropShipPO.btnAddLine.Size(2490,375)
+Gui.formDropShipPO.btnAddLine.Position(2730,3960)
+Gui.formDropShipPO.btnAddLine.Caption("Add Line to PO")
+Gui.formDropShipPO.btnAddLine.DefaultValue("")
+Gui.formDropShipPO.btnAddLine.Event(Click,btnAddLine_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: GaryB
+'Date:   11/15/18
+'Customer: C & B Piping
+'Adding a line to a drop PO 
+'Order Entry > File > Sales Orders > Open> click on DropPOs button (hook # 11860), when button is clicked 
+'we will check and see if any lines for the order already have a PO assigned to them, if they do we will
+'give customer screen to attach other lines to existing PO
+'GCG_5224_DropPO.g2u
+
+'William Nichols added RTRIM() to ORDER_NO becuse without it the script was breaking.
+
+
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+
+v.Local.sSQL.Declare(String)
+v.Local.iDropCount.Declare(Long)
+v.Local.iLineCount.Declare(Long)
+v.Local.iHistLineCount.Declare(Long)
+V.Local.sTemp.Declare(String)
+v.Local.sOrder.Declare(String)
+v.Local.iReturn.Declare(Long)
+v.Local.iTempCount.Declare(Long)
+v.Local.sPOExists.Declare(String)
+v.Local.fPOCost.Declare(Float)
+v.Local.sPart.Declare(String)
+v.Local.iRow.Declare(Long)
+v.Local.iCnt.Declare(Long)
+v.Local.sFilter.Declare(String)
+v.Local.sPO_Line.Declare(String)
+
+'open DB connection
+f.ODBC.Connection!Con.OpenCompanyConnection
+
+f.Intrinsic.Control.If(v.Caller.Hook,=,11860)
+   f.Intrinsic.String.LPad(v.Passed.000003.String,0,7,v.Local.sOrder)
+' get the count from the po_drop_ship table for the number of drop ship lines from the sales order that comes from the screen
+      F.Intrinsic.String.Build("SELECT COUNT(PO) FROM PO_DROP_SHIP WHERE RTRIM(ORDER_NO) = '{0}'",V.Local.sOrder,V.Local.sSQL)
+      F.ODBC.Connection!Con.ExecuteandReturn(V.Local.sSQL,v.Local.iDropCount)
+' get the count of the number of lines from the order_lines table that are drop ship type and match the order_no 
+      f.Intrinsic.String.Build("SELECT COUNT(ORDER_NO) FROM ORDER_LINES WHERE LINE_TYPE = 'D' AND RECORD_TYPE = 'L' AND RTRIM(ORDER_NO) = '{0}'",V.Local.sOrder,V.Local.sSQL)
+      F.ODBC.Connection!Con.ExecuteandReturn(V.Local.sSQL,v.Local.iLineCount)
+' get the count of the number of lines from the V_ORDER_HIST_LINE table that are drop ship type and match the order_no
+      f.Intrinsic.String.Build("SELECT COUNT(ORDER_NO) FROM V_ORDER_HIST_LINE WHERE LINE_TYPE = 'D' AND RTRIM(ORDER_NO) = '{0}'",V.Local.sOrder,V.Local.sSQL)
+      F.ODBC.Connection!Con.ExecuteandReturn(V.Local.sSQL,v.Local.iHistLineCount)
+      f.Intrinsic.Math.Add(V.Local.iLineCount,V.Local.iHistLineCount,v.Local.iLineCount)
+      
+      f.Intrinsic.Control.If(v.Local.iDropCount,<,v.Local.iLineCount)
+         f.Intrinsic.UI.Msgbox("PO exists for other lines use that PO ? ","PO Exists",3,v.Local.iReturn)
+         f.Intrinsic.Control.If(v.Local.iReturn,=,6)
+'get lines from order_lines table for order where record type = "L" and line_type = "D" 
+'get drop po info from po_drop_ship table   
+
+            f.Intrinsic.String.Build("SELECT CONVERT(0,SQL_BIT) AS SelectLine,RECORD_NO,PART,DESCRIPTION,CUSTOMER,QTY_ORDERED,PRICE,ORDER_NO,DATE_ITEM_PROM,GL_ACCOUNT,PRODUCT_LINE,UM_ORDER,QTY_BO FROM ORDER_LINES WHERE LINE_TYPE = 'D' AND RECORD_TYPE = 'L' AND RTRIM(ORDER_NO) = '{0}'",V.Local.sOrder,V.Local.sSQL) 
+            f.Data.DataTable.CreateFromSQL("dtDropPO","con",v.Local.sSQL,TRUE)
+            f.Intrinsic.String.Build("Select PO,PO_LINE,ORDER_NO,ORDER_LINE,PART,LOC from PO_DROP_SHIP WHERE RTRIM(ORDER_NO) = '{0}'",V.Local.sOrder,V.Local.sSQL)
+            F.Data.DataTable.CreateFromSQL("dtDrops","con",v.Local.sSQL,TRUE)
+            f.Data.Linq.Join("Leftjoin","datatable","dtDropPO*!*D","datatable","dtDrops*!*L","D.ORDER_NO=L.ORDER_NO AND D.RECORD_NO=L.ORDER_LINE","D.SelectLine*!*D.RECORD_NO*!*D.PART*!*L.LOC*!*D.DESCRIPTION*!*L.PO*!*L.PO_LINE*!*D.QTY_ORDERED*!*D.DATE_ITEM_PROM*!*D.GL_ACCOUNT*!*L.ORDER_NO*!*D.PRODUCT_LINE*!*D.UM_ORDER*!*D.QTY_BO","","","","dtDropLines",True)
+''loop thru datatable and add PO and Order_no if missing from linq 
+            f.Intrinsic.String.Build("Select top 1 PO from PO_DROP_SHIP WHERE RTRIM(ORDER_NO) = '{0}'",V.Local.sOrder,V.Local.sSQL)
+            F.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.sTemp)
+            F.Intrinsic.Control.For(V.Local.iCnt,0,V.DataTable.dtDropLines.RowCount--,1)
+               F.Intrinsic.Control.If(V.DataTable.dtDropLines(V.Local.iCnt).ORDER_NO!FieldVal,=,"")
+                   f.Data.DataTable.SetValue("dtDropLines",v.Local.iCnt,"ORDER_NO",v.Local.sOrder)  
+                F.Intrinsic.Control.EndIf
+                F.Intrinsic.Control.If(V.DataTable.dtDropLines(V.Local.iCnt).PO!FieldVal,=,"")
+                   f.Data.DataTable.SetValue("dtDropLines",v.Local.iCnt,"PO",v.Local.sTemp)  
+                f.Intrinsic.Control.Else
+                  f.Data.DataTable.SetValue("dtDropLines",v.Local.iCnt,"SelectLine",True) 
+                F.Intrinsic.Control.EndIf
+            F.Intrinsic.Control.Next(V.Local.iCnt)
+            F.Data.DataTable.AcceptChanges("dtDropLines")
+'end of loop to add PO and order_no              
+            f.Data.DataTable.AddColumn("dtDropLines","PO_Cost","Float")
+'loop thru datatable to get all the parts and their costs
+'select amt_cost from inventory_mstr where part = 'part' if cost is 0 then 
+'select top 1 * from "PO_history" where part = 'part' order by purchase_order desc, po_line desc
+            f.Intrinsic.Control.For(v.Local.iRow,0,v.DataTable.dtDropPO.RowCount--,1)       
+               v.Local.sPart.Set(v.DataTable.dtDropPO(v.Local.iRow).Part!Fieldval)
+               F.Intrinsic.String.Build("SELECT AMT_COST FROM V_INVENTORY_MSTR WHERE PART = '{0}'",v.Local.sPart,V.Local.sSQL)
+               F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL,V.Local.fPOCost)  
+               f.Intrinsic.Control.If(v.Local.fPOCost,=,0)
+                  F.Intrinsic.String.Build("select top 1 cost from PO_history where part = '{0}' order by purchase_order desc, po_line desc",v.Local.sPart,V.Local.sSQL)
+                  F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL,V.Local.fPOCost)
+               f.Intrinsic.Control.EndIf
+               f.Data.DataTable.SetValue("dtDropLines",v.Local.iRow,"PO_Cost",v.Local.fPOCost) 
+'need to use the record_no field to come up with the po_line field, this way the po_line and record_no fields stay in sync               
+               F.Intrinsic.String.Left(v.DataTable.dtDropPO(v.Local.iRow).RECORD_NO!Fieldval, 3, V.Local.sPO_Line) 
+               f.Data.DataTable.SetValue("dtDropLines",v.Local.iRow,"PO_LINE",v.Local.sPO_Line)             
+            f.Intrinsic.Control.Next(v.local.iRow)
+'increment the po line column
+     '       f.Data.DataTable.SetSeries("dtDropLines","PO_LINE",1,1)
+ 'create a view of the rows 
+            f.Data.DataView.Create("dtDropLines","dvDropLines",22)                 
+            f.Intrinsic.Control.CallSub(CreatePo)         
+         f.Intrinsic.Control.EndIf
+      f.Intrinsic.Control.EndIf   
+f.Intrinsic.Control.EndIf      
+'close the DB connection
+f.ODBC.Connection!Con.Close
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    f.Intrinsic.Control.CallSub(formDropShipPO_Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.CreatePo.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+
+v.Local.iRow.Declare(Long)
+
+'create gridview
+gui.formDropShipPO.GsGridDropShipPo.AddGridviewFromDataview("gvDropPoLines","dtDropLines","dvDropLines")
+'change grid column names
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","SelectLine","Caption","Select Line")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","RECORD_NO","Caption","Line Number")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PART","Caption","Part")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_ORDERED","Caption","Inv Quantity")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO","Caption","PO")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_LINE","Caption","PO Line")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","DATE_ITEM_PROM","Caption","Due Date")
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Inv_Cost","Caption","Inv Cost")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_Cost","Caption","PO Cost")
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_Qty","Caption","PO Qty")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","GL_Account","Caption","GL Account")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Product_Line","Caption","Product Line")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","UM_ORDER","Caption","Unit Measure")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_BO","Caption","PO QTY")
+'bold columns
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","SelectLine","HeaderFontBold",True)
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","RECORD_NO","HeaderFontBold",True)
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PART","HeaderFontBold",True)
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_ORDERED","HeaderFontBold",True)
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO","HeaderFontBold",True)
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_LINE","HeaderFontBold",True)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","DATE_ITEM_PROM","HeaderFontBold",True)
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Inv_Cost","HeaderFontBold",True)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_Cost","HeaderFontBold",True)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_BO","HeaderFontBold",True)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","GL_Account","HeaderFontBold",True)
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Product_line","HeaderFontBold",True)
+''center columnnames
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","SelectLine","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","RECORD_NO","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PART","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_ORDERED","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_LINE","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","DATE_ITEM_PROM","HeaderHAlignment","Center")
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Inv_Cost","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_Cost","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_BO","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","GL_Account","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Product_Line","HeaderHAlignment","Center")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","UM_ORDER","HeaderHAlignment","Center")
+'let user select the line checkbox and edit date due field
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","SelectLine","ReadOnly","False")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","DATE_ITEM_PROM","ReadOnly","False")
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","GL_Account","ReadOnly","False")
+'gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Inv_Cost","ReadOnly",False)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PO_Cost","ReadOnly",False)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_BO","ReadOnly",False)
+'set minwidth for part column
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","PART","MinWidth",100)
+'loop thru dtdroplines table - we will highlight and not allow use to edit lines that have a PO already there
+'we will check this by looking at the selectedline column - if it's true then we need to highlight and no edit this one 
+'and also undo the selectline checkbox
+ f.Intrinsic.Control.For(v.Local.iRow,0,v.DataView.dtDropLines!dvDropLines.RowCount--,1)   
+   f.Intrinsic.Control.If(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).SelectLine!FieldVal,=,True) 
+       gui.formDropShipPO.GsGridDropShipPo.SetRowAppearance("gvDropPoLines",v.Local.iRow,"BackColor","LightGreen")
+       gui.formDropShipPO.GsGridDropShipPo.SetRowProperty("gvDropPoLines",v.Local.iRow,"Locked",true)
+       f.Data.DataTable.SetValue("dtDropLines",v.Local.iRow,"SelectLine",False)       
+   f.Intrinsic.Control.EndIf    
+ f.Intrinsic.Control.Next(v.local.iRow)  
+ F.Data.DataTable.AcceptChanges("dtDropLines")
+'do not dipslay some columns they are needed for the upload but the user can't change them
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","Product_Line","Visible",False)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","UM_Order","Visible",False)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","QTY_Ordered","Visible",False)
+gui.formDropShipPO.GsGridDropShipPo.SetColumnProperty("gvDropPoLines","ORDER_NO","Visible",False)
+'set this to the mainview
+gui.formDropShipPO.GsGridDropShipPo.MainView("gvDropPoLines") 
+'show the screen
+gui.formDropShipPO..Show
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    f.Intrinsic.Control.CallSub(formDropShipPO_UnLoad)
+F.Intrinsic.Control.EndTry
+Program.Sub.CreatePo.End
+
+Program.Sub.formDropShipPO_UnLoad.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+
+'f.ODBC.Connection!Con.Close
+f.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError) 
+F.Intrinsic.Control.EndTry
+Program.Sub.formDropShipPO_UnLoad.End
+
+Program.Sub.btnAddLine_Click.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+v.Local.sOrder.Declare(String)
+v.Local.sSql.Declare(String)
+v.Local.iDate.Declare(Long)
+v.Local.iRow.Declare(Long)
+v.Local.sPOLine.Declare(String)
+v.Local.sPURORDER.Declare(String)
+v.Local.sDecription.Declare(String)
+v.Local.sLine.Declare(String)
+v.Local.sHold.Declare(String)
+v.Local.iCount.Declare(Long)
+v.Local.sReturn.Declare(String)
+v.Local.sPart.Declare(String)
+v.Local.iDate.Set(v.Ambient.Date.FormatYYYYMMDD)  
+v.Local.sOrderNum.Declare(String)
+v.Local.sOrderLine.Declare(String)
+
+f.ODBC.Connection!Con.OpenCompanyConnection
+
+v.Local.iCount.Set(0)
+F.Intrinsic.String.Concat(V.Caller.FilesDir,"\Purorder.txt",V.Local.sPURORDER)
+f.Intrinsic.Control.For(v.Local.iRow,0,v.DataView.dtDropLines!dvDropLines.RowCount--,1)   
+   f.Intrinsic.Control.If(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).SelectLine!FieldVal,=,True)     
+      f.Intrinsic.String.LPad(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).PO_Line!FieldVal,"0",3,v.Local.sPOLine) 
+      f.Intrinsic.String.Concat(v.Local.sPOLine,"0",v.Local.sPOLine)
+      F.Intrinsic.String.Build("INSERT INTO PO_DROP_SHIP(PO,PO_LINE,ORDER_NO,ORDER_LINE,PART,LOC,DATE_LAST_CHG,TIME_LAST_CHG,LAST_CHG_BY,LAST_CHG_PGM) VALUES('{0}','{1}','{2}','{3}','{4}','{5}','{6}','{7}','{8}','{9}');",v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).PO!fieldval,v.Local.sPOLine,v.DataView.dtDropLines!dvDropLines(v.Local.iRow).Order_No!fieldval,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).Record_No!fieldval,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).Part!fieldval,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).Loc!fieldval,v.local.iDate,V.Ambient.Time.FormatHHNNSS00,v.Caller.User,"GCG_5224",V.Local.sSQL)
+      f.ODBC.Connection!Con.Execute(v.Local.sSql) 
+    f.Intrinsic.Math.Add(v.Local.iCount,1,v.Local.iCount)
+   ' v.Local.sLine.Set(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).PO!fieldval)
+    f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).PO!fieldval,v.Local.sLine)
+	'Line num
+	f.Intrinsic.String.LPad(v.Local.sPOLine,"0",3,v.Local.sHold)
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Local.sHold,v.Local.sLine)
+	'Part num already formatted 20 chars
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).Part!fieldval,v.Local.sLine)	
+	'Location - 
+	f.Intrinsic.String.RPad(v.Local.sLine," ",31,v.Local.sLine)
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).Loc!fieldval,v.Local.sLine)
+	'Descr already formatted 30 chars. 
+	f.Intrinsic.String.RPad(v.Local.sLine," ",32,v.Local.sLine)
+	v.Local.sDecription.Set(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).Description!fieldval)
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,V.Local.sDecription.PSQLFriendly,v.Local.sLine)
+	'Unit of measure 
+	f.Intrinsic.String.RPad(v.Local.sLine," ",62,v.Local.sLine)	
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).UM_Order!fieldval,v.Local.sLine)
+	'GL Account
+	f.Intrinsic.String.RPad(v.Local.sLine," ",100,v.Local.sLine)
+	f.Intrinsic.String.RPad(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).GL_Account!fieldval," ",10,v.Local.sHold)
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Local.sHold,v.Local.sLine)
+	'Product Line
+	f.Intrinsic.String.RPad(v.Local.sLine," ",121,v.Local.sLine)
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).Product_Line!fieldval,v.Local.sLine)
+	'Purchasing Cost - get from inventory if blank get from po_hist	
+	f.Intrinsic.String.RPad(v.Local.sLine," ",136,v.Local.sLine)
+	f.Intrinsic.String.Format(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).PO_COST!fieldval,"0.######",v.Local.sHold)
+	f.Intrinsic.String.LPad(v.Local.sHold,"0",16,v.Local.sHold)
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Local.sHold,v.Local.sLine)
+	'Purchasing Quantity Ordered - QTY_BO 
+	f.Intrinsic.String.RPad(v.Local.sLine," ",168,v.Local.sLine)
+	f.Intrinsic.String.Format(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).QTY_BO!fieldval,"0.####",v.Local.sHold)
+	f.Intrinsic.String.LPad(v.Local.sHold,"0",16,v.Local.sHold)
+	f.Intrinsic.String.Build("{0}{1}",v.Local.sLine,v.Local.sHold,v.Local.sLine)
+'this is not required I am not including it
+'Exchange Currency
+'	f.Intrinsic.String.RPad(v.Local.sLine," ",339,v.Local.sLine)
+'	f.Intrinsic.String.Build("{0}USD",v.Local.sLine,v.Local.sLine)
+'	f.Intrinsic.String.Build("{0}USD",v.Local.sLine,v.Local.sLine)
+
+	'Cost Source Code: M for Manual
+	f.Intrinsic.String.RPad(v.Local.sLine," ",587,v.Local.sLine)
+	f.Intrinsic.String.Build("{0}M",v.Local.sLine,v.Local.sLine)
+
+	f.Intrinsic.String.RPad(v.Local.sLine," ",653,v.Local.sLine)	
+
+   	f.Intrinsic.Control.If(v.Local.iCount,=,1)
+   	   F.Intrinsic.File.String2File(V.Local.sPURORDER,v.Local.sLine)   	   
+   	f.Intrinsic.Control.Else   
+       f.Intrinsic.File.Append2FileNewLIne(v.Local.sPURORDER,v.Local.sLine)       
+    f.Intrinsic.Control.EndIf
+    v.Local.sLine.Set("")  
+'need to get the sales order line extra_text field and load it into the po_ln_text field - they use this value in one of their reports
+    v.Local.sOrderNum.Set(v.DataView.dtDropLines!dvDropLines(v.Local.iRow).Order_No!fieldval)
+    v.Local.sOrderLine.Set(v.DataView.dtDropLines!dvDropLines(v.Local.iRow).Record_No!fieldval)
+    F.Intrinsic.String.Build("Select Text from Order_Ln_Text Where Order_Num = '{0}' and Order_Line = '{1}'",v.Local.sOrderNum.Trim,v.Local.sOrderLine.Trim,v.Local.sSQL)
+	f.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.sReturn)
+	f.Intrinsic.String.LPad(v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).PO_Line!FieldVal,"0",3,v.Local.sPOLine) 
+    f.Intrinsic.String.Concat(v.Local.sPOLine,"0",v.Local.sPOLine)
+	F.Intrinsic.String.Build("INSERT INTO PO_LN_TEXT(PO_NUM,LINE,TEXT) VALUES ('{0}','{1}','{2}');",v.Dataview.dtDropLines!dvDropLines(v.Local.iRow).PO!Fieldval,v.Local.sPOLine,v.Local.sReturn.PSQLFriendly,V.Local.sSQL)
+    f.ODBC.Connection!Con.Execute(v.Local.sSql)
+
+    f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Next(v.Local.iRow) 
+'Upload POs
+'run synchronous so when we exit screen, values will already be displayed
+F.Global.General.CallWrapperSync(50,"UPLPUROR/U/A") 
+'delete rows from table where "selected" was checked
+'read thru the table backwards so when we delete a line the correct line is deleted
+f.Intrinsic.Control.For(v.Local.iRow,v.DataView.dtDropLines!dvDropLines.RowCount--,0,-1)   
+   f.Intrinsic.Control.If(v.DataView.dtDropLines!dvDropLines(v.Local.iRow).SelectLine!FieldVal,=,True)
+      f.Data.DataTable.DeleteRow("dtDropLines",v.Local.iRow)    
+   f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Next(v.Local.iRow)
+f.Data.DataTable.AcceptChanges("dtDropLines")
+f.Intrinsic.UI.Msgbox("Drop Ship Po has been created")
+F.ODBC.Connection!Con.Close
+f.Intrinsic.Control.CallSub(formDropShipPO_UnLoad)
+
+'***** po upload layout ****** if it has a * in the front it is required
+'*po - 1-7 - 7
+'*line# - 8-10 - 3 - 001-999
+'*part num - 11-30 - 20
+'part loc -31-32 - 2
+'*part description - 33-62 - 30
+'*po unit of measure - 63-64 - 2
+'account closed flag - 65-65 - 1
+'work order num 66-71 - 6
+'work order seq 72-77 - 6
+'requisistion num - 78-83 - 6
+'department - 84-87 - 4
+'tax status flag - 88-88 - 1 E exempt, T - taxable
+'sort code - 89-100 - 12
+'GL account - only 10 characters for now - 101-115 - 10
+'inventory bin - 116-121 - 6
+'product line - 122-123 - 2
+'filler 124 - 124 - 1
+'due date MMDDYY - 125-130 - 6
+'last receipt date - MMDDYY - 131-136 - 6
+'purchasing cost - 10.6 137-152 - 16
+'discount 10.4 - 153-168 - 16
+'pur quantity ordered - 10.4 - 169-184 - 16
+'pur quantity received - 10.4 - 185-200 - 16
+'pur quantity rejected - 10.4 - 201-216 - 16
+'extension amount - 14.2 - 217-232 - 16
+'inv quantity received - 233-248 - 16
+'close po line Y/N - 249-249 - 1
+'continue description - blank - 250-250 - 1
+'received quantity not inspected - 251-266 - 16
+'work order suffix - if work order exists - 267-269 - 3
+'manufacturing part num - 270-292 - 23
+'manufacturing name - 293-315 - 23
+'inv quantity ordered - if conversion factor(inv master) is > 0 use this field for converted order quantity,if blank program calculates it, ubless override conversion flag - column 590 below is "Y" - 10.4 - 316-331 - 16
+'inv unit of measure - 332-333 - 2
+'filler - blank - 334-339 - 6
+'*exchange currency - 340-342 - 3
+'exchange extension - 14.2 - 343-358 - 16
+'user defined fields
+'user 1 - 359-388 - 30
+'user 2 - 389-418 - 30
+'user 3 - 419-448 - 30
+'user 4 - 449-478 - 30
+'user 5 - 479-508 - 30
+'exchange date - CCYYMMDD - 509-516 - 8
+'exchange cost - 10.6 - 517-532 - 16
+'exchange rate - 5.5 533-548 - 16
+'requistion line num - 549-551 - 3
+'requires inspection flag - Y/N - 552-552 - 1
+'original due date - if blank line uses line due date - CCYYMMDD - 553-560 - 8
+'line ship date  - CCYYMMDD - 561-568 - 8
+'shipped quantity - +/-10.4 - 569-587 - 19
+'cost source code - 588-588 - 1 I - inventory, H - history, V - vendor quote, M - manual, O - outside
+'requires testing flag - Y/N - 589-589 - 1
+'override conversion flag - Y/N 590-590 - 1 : Y - will not allow program to recalc inv quantity ordered(col:316-331), N or Blank - will aloow program to calc inventory quantity ordered (col:316-331) = conversion factor from invmaster * pur quantity ordered (col:169- 184)
+'inventory cost +/- 10.6 - 591-609 - 19
+'packing list printed - Y/N - 610-610 - 1
+'gl manually entered -611-611 - 1 : Y - will not allow system to refresh G/L account
+'receive to WO - 612-612 - 1 : Y/N
+'roll quantity - 7.0 - 713-628 - 16 works with roll flag on inventory master options
+'tax code - 629-633 - 5 - this field is available if taxable is checked for line item, defaults to tax code entered on po header - can be changed
+'VAT rule - 634-635 - 2 if taxable and using VAT
+'book use tax - 636-636 - 1 : Y/N
+'fixed asset - 637-642 - 6 - must be a valid fixed asset
+'blanket po num - 653-649 - 7 - must be valid PO from blanket type PO
+'blanket po line - 650-653 - 4 must be valid PO line from blanket type PO
+
+
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    f.Intrinsic.Control.CallSub(formDropShipPO_UnLoad)
+F.Intrinsic.Control.EndTry
+Program.Sub.btnAddLine_Click.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$$}$12:00:00 AM$}$False
+${$5$}$2.0.0.0$}$2
+${$6$}$wnichols$}$20210712153421723$}$h3jCD/nJ6bE/cd0Fx7GbYZBAEscRS8LBO2yOYISFOEm9wbsP3k0VSsbSXr5t1EM9K0nxL9eyPDoWzWRa5uPEIg==
+Program.Sub.Comments.End
